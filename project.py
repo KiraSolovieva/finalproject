@@ -1,17 +1,22 @@
 import tkinter as tk
+import math
 
 # Параметры для ацетилена (C2H2)
-a = 4.936  # л^2·атм/моль^2
+a = 4.936  # л^2·бар/моль^2
 b = 0.05136  # л/моль
-R = 0.08314  # л·атм/(моль·К)
-T = 300     # К (температура ниже критической)
+R = 0.08314  # л·бар/(моль·К)
+T = 300     # К
 
-# Уравнение Ван-дер-Ваальса: давление как функция объёма (для ацетилена)
+# Уравнение Ван-дер-Ваальса
 def P_vdw(V, T):
+    if V <= b or V <= 0:
+        return float('inf')  # Избегаем деления на ноль
     return R * T / (V - b) - a / (V * V)
 
-# Уравнение состояния для идеального газа: P = RT/V
+# Уравнение идеального газа
 def P_ideal(V, T):
+    if V <= 0:
+        return float('inf')
     return R * T / V
 
 # Численное интегрирование методом трапеций
@@ -22,111 +27,90 @@ def integrate_trapezoid(f, V_start, V_end, n, T):
         result += f(V_start + i * h, T)
     return h * result
 
-# Поиск давления насыщения и объёмов по правилу Максвелла (для Ван-дер-Ваальса)
+# Поиск максимума и минимума для определения области фазового перехода
+def find_extrema(V_min, V_max, n):
+    pressures = [(V, P_vdw(V, T)) for V in [V_min + i * (V_max - V_min) / n for i in range(n + 1)]]
+    max_P = max(pressures, key=lambda x: x[1])
+    min_P = min(pressures, key=lambda x: x[1])
+    return max_P[0], max_P[1], min_P[0], min_P[1]
+
+# Поиск давления насыщения и объёмов
 def find_coexistence_volumes():
-    V_min = b + 0.01  # Начальный объём (чуть больше b)
-    V_max = 10.0      # Большой объём (газовая фаза)
-    n = 1000          # Число шагов для интегрирования
-    tolerance = 1e-3  # Допустимая погрешность
-    P_guess = 1.0     # Начальное предположение для давления насыщения
+    V_min = b + 0.01
+    V_max = 0.45  # Ограничиваем значение
+    n = 10000    # Увеличиваем число шагов
+    tolerance = 1e-4
+    P_guess = 39.0
 
-    for iteration in range(100):
-        V1, V2 = V_min, V_max
-        for V in [V_min + i * (V_max - V_min) / n for i in range(n + 1)]:
-            pressure = P_vdw(V, T)
-            if abs(pressure - P_guess) < tolerance:
-                if V < 0.5:  # Примерное разделение на жидкость и газ
-                    V1 = V
-                else:
-                    V2 = V
+    for iteration in range(200):
+        # Находим максимум и минимум
+        V_max_p, P_max, V_min_p, P_min = find_extrema(V_min, V_max, n)
+        # Ищем точки пересечения с P_guess
+        pressures = [(V, P_vdw(V, T)) for V in [V_min + i * (V_max - V_min) / n for i in range(n + 1)]]
+        candidates = sorted([V for V, P in pressures if abs(P - P_guess) < tolerance and V > b])
 
-        area1 = integrate_trapezoid(lambda V, T: P_vdw(V, T) - P_guess, V1, V2, n, T)
-        area2 = integrate_trapezoid(lambda V, T: P_guess - P_vdw(V, T), V1, V2, n, T)
-        difference = area1 + area2
+        if len(candidates) >= 2:
+            V1 = min(candidates)  # Первая точка (жидкая фаза)
+            V2 = max(candidates)  # Вторая точка (газовая фаза)
+        else:
+            V1, V2 = V_min, V_max  # Если не нашли, используем границы
+
+        # Проверяем правило Максвелла
+        area1 = integrate_trapezoid(lambda V, T: max(0, P_vdw(V, T) - P_guess), V1, V2, n, T)
+        area2 = integrate_trapezoid(lambda V, T: max(0, P_guess - P_vdw(V, T)), V1, V2, n, T)
+        difference = area1 - area2
 
         if abs(difference) < tolerance:
             break
-        P_guess += difference * 0.01
+        P_guess += difference * 0.00001  # Очень маленький шаг
 
     return V1, V2, P_guess
 
-# Вычисление объёмов и давления
+# Вычисление
 V1, V2, P_saturation = find_coexistence_volumes()
-print(f"V1 (жидкость) = {V1:.3f} л/моль")
-print(f"V2 (газ) = {V2:.3f} л/моль")
-print(f"Давление насыщения = {P_saturation:.3f} атм")
+print(f"V1 = {V1:.3f} л/моль, V2 = {V2:.3f} л/моль, P_eq = {P_saturation:.2f} бар")
 
-# Построение графика с помощью tkinter
+# График с tkinter
 root = tk.Tk()
-root.title("Изотермы для ацетилена и идеального газа")
-
-# Создаём холст
-canvas_width = 600
-canvas_height = 400
-canvas = tk.Canvas(root, width=canvas_width, height=canvas_height, bg="white")
+root.title("Изотерма C2H2 при T = 300 K")
+canvas = tk.Canvas(root, width=600, height=400, bg="white")
 canvas.pack()
 
-# Определяем масштабы для графика
-V_min, V_max = 0.0, 10.0  # Диапазон объёма (л/моль)
-P_min, P_max = -5.0, 15.0  # Диапазон давления (атм)
+V_min, V_max = b + 0.001, 0.5  # Реальный диапазон
+P_min, P_max = 0.0, 500.0     # Увеличиваем для идеального газа
 
-# Функции для масштабирования значений в координаты холста
-def scale_V(V):
-    return (V - V_min) / (V_max - V_min) * (canvas_width - 50) + 25
+def scale_V(V): return 25 + math.log10(V / V_min + 1) / math.log10(V_max / V_min + 1) * 550
+def scale_P(P): return 375 - (P - P_min) / (P_max - P_min) * 350
 
-def scale_P(P):
-    return canvas_height - ((P - P_min) / (P_max - P_min) * (canvas_height - 50) + 25)
+canvas.create_line(25, 375, 575, 375, fill="black")  # Ось X
+canvas.create_line(25, 375, 25, 25, fill="black")    # Ось Y
+canvas.create_text(300, 390, text="Объём (л/моль)")
+canvas.create_text(10, 200, text="Давление (бар)", angle=90)
 
-# Рисуем оси
-canvas.create_line(25, canvas_height - 25, canvas_width - 25, canvas_height - 25, fill="black")  # Ось X (V)
-canvas.create_line(25, canvas_height - 25, 25, 25, fill="black")  # Ось Y (P)
-
-# Подписи осей
-canvas.create_text(canvas_width // 2, canvas_height - 10, text="Объём (л/моль)", fill="black")
-canvas.create_text(10, canvas_height // 2, text="Давление (атм)", fill="black", angle=90)
-
-# Рисуем изотерму Ван-дер-Ваальса (ацетилен)
+# Изотерма Ван-дер-Ваальса
 points_vdw = []
 for V in [V_min + i * (V_max - V_min) / 1000 for i in range(1001)]:
-    try:
-        P_value = P_vdw(V, T)
-        if P_min <= P_value <= P_max:
-            x = scale_V(V)
-            y = scale_P(P_value)
-            points_vdw.append((x, y))
-    except:
-        continue
-
+    P = P_vdw(V, T)
+    if P_min <= P <= P_max:
+        points_vdw.append((scale_V(V), scale_P(P)))
 for i in range(len(points_vdw) - 1):
-    x1, y1 = points_vdw[i]
-    x2, y2 = points_vdw[i + 1]
-    canvas.create_line(x1, y1, x2, y2, fill="blue")
+    canvas.create_line(points_vdw[i], points_vdw[i+1], fill="blue")
 
-# Рисуем изотерму идеального газа
+# Изотерма идеального газа
 points_ideal = []
 for V in [V_min + i * (V_max - V_min) / 1000 for i in range(1001)]:
-    try:
-        P_value = P_ideal(V, T)
-        if P_min <= P_value <= P_max:
-            x = scale_V(V)
-            y = scale_P(P_value)
-            points_ideal.append((x, y))
-    except:
-        continue
-
+    P = P_ideal(V, T)
+    if P_min <= P <= P_max:
+        points_ideal.append((scale_V(V), scale_P(P)))
 for i in range(len(points_ideal) - 1):
-    x1, y1 = points_ideal[i]
-    x2, y2 = points_ideal[i + 1]
-    canvas.create_line(x1, y1, x2, y2, fill="green")
+    canvas.create_line(points_ideal[i], points_ideal[i+1], fill="green", dash=(4, 4))
 
-# Рисуем линию давления насыщения (для Ван-дер-Ваальса)
-P_scaled = scale_P(P_saturation)
-canvas.create_line(25, P_scaled, canvas_width - 25, P_scaled, fill="red", dash=(4, 4))
+# Линия давления насыщения
+canvas.create_line(25, scale_P(P_saturation), 575, scale_P(P_saturation), fill="red", dash=(4, 4))
 
-# Добавляем текст для обозначения линий
-canvas.create_text(canvas_width - 100, 50, text="Ацетилен ", fill="blue")
-canvas.create_text(canvas_width - 100, 70, text="Идеальный газ", fill="green")
-canvas.create_text(canvas_width - 100, 90, text="P насыщения", fill="red")
+# Метки
+canvas.create_text(500, 50, text="Ацетилен", fill="blue")
+canvas.create_text(500, 70, text="Идеальный газ", fill="green")
+canvas.create_text(500, 90, text="P насыщения", fill="red")
 
-# Запускаем окно
 root.mainloop()
