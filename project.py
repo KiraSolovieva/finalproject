@@ -62,7 +62,7 @@ def find_coexistence_volumes():
 
         if abs(difference) < tolerance:
             break
-        P_guess += difference * 0.00001  # Очень маленький шаг
+        P_guess += difference * 0.00001  
 
     return V1, V2, P_guess
 
